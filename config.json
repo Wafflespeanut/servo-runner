@@ -1,0 +1,7 @@
+{
+    "logins": [{
+        "user": "bot_1",
+        "token": "foo123"
+    }],
+    "secret": null
+}
