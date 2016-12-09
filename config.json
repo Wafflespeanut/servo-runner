@@ -3,5 +3,7 @@
         "user": "bot_1",
         "token": "foo123"
     }],
-    "secret": null
+    "secret": null,
+    "servo_path": "/media/Ubuntu/servo",
+    "build": "debug"
 }
