@@ -1,29 +1,37 @@
 
+from api_provider import ServoGithubAPIProvider
 from datetime import datetime
 
 import json, os, subprocess, shutil, sys
 
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
-# WPT_COMMAND = './mach test-%s tests/wpt/web-platform-tests/dom/events/Event-dispatch-click.html --debugger=rr --debugger-args=record --no-pause --log-raw %s'
-WPT_COMMAND = './mach test-%s tests/wpt/css-tests/css21_dev/html4/abs-pos-non-replaced-vlr-051.htm --debugger=rr --debugger-args=record --no-pause --log-raw %s'
+WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --no-pause --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
 
 
 class IntermittentWatcher(object):
-    def __init__(self, upstream, test='css', build='debug'):
+    def __init__(self, upstream, user, token, db, build='debug'):
+        os.chdir(upstream)
+        self.api = ServoGithubAPIProvider(user, token)
+        sys.path.append(os.path.join(db))
+        from db import IntermittentsDB
+        with open(os.path.join(db, 'intermittents.json'), 'r') as fd:
+            self.db = IntermittentsDB(json.load(fd))
         self.last_updated = datetime.now().day - 1
-        self.build = build
-        self.upstream = upstream
-        self.test = test
-        os.chdir(self.upstream)
+        self.build = 'debug'
+        if build == 'release':
+            self.build = 'release'
+        self.test = 'wpt'
 
-    def execute(self, command, call= lambda l: sys.stdout.write(l) and sys.stdout.flush()):
+    def execute(self, command, call= lambda l: None):
         out = ''
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         for line in iter(proc.stdout.readline, ''):
-            call(line)
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            call(line)      # call a custom function with stdout lines as and whenever we get one
             out += line
         proc.wait()
         return out
@@ -45,36 +53,39 @@ class IntermittentWatcher(object):
                 if obj['thread'] == 'MainThread':
                     continue
                 if obj['action'] == 'test_start':
-                    current[obj['thread']] = obj['test']
+                    current[obj['thread']] = obj['test']    # tests running in each thread
                     results.setdefault(obj['test'], {'record': None, 'issue': None, 'subtest': {}})
                 elif obj['action'] == 'process_output':
                     test = current[obj['thread']]
-                    if obj['data'].startswith('rr: Saving'):
+                    if obj['data'].startswith('rr: Saving'):    # get the rr-record location
                         data = obj['data'].split()
                         results[test]['record'] = data[-1][1:-2]
-                if obj.get('expected'):
+                if obj.get('expected'):     # there's an unexpected result
                     test, subtest = current[obj['thread']], obj.get('subtest', obj['test'])
+                    issues = self.db.query(test)
+                    if issues:
+                        results[test]['issue'] = issues[0]['number']        # FIXME: handle multiple results?
                     results[test]['subtest'][subtest] = {'data': '', 'status': obj['status']}
 
         for result in map(str.strip, out.split('\n\n')):
             data = result.splitlines()
             name = data[0][data[0].find('/'):]
             if SUBTEST_PREFIX in result:
-                test = name[:-1]
-                subtest = data[1][(data[1].find(']') + 2):]
-                results[test]['subtest'][subtest]['data'] = result
+                test = name[:-1]    # strip out the colon
+                subtest = data[1][(data[1].find(']') + 2):]     # get the subtest name
             else:
-                test, subtest = name, name
-                results[test]['subtest'][subtest]['data'] = result
+                test, subtest = name, name      # tests without subtests
+            results[test]['subtest'][subtest]['data'] = result
 
         self.log('Cleaning up...')
         for test in results:
             if not results[test]['subtest']:
                 t = results.pop(test)
-                self.log('Removing unused record %r for test %r' % (t['record'], test))
-                shutil.rmtree(t['record'])
+                if t['record']:
+                    self.log('Removing unused record %r for test %r' % (t['record'], test))
+                    shutil.rmtree(t['record'])
 
-        print results
+        exit(results)
 
     def update(self):
         self.log('Updating upstream...')
@@ -86,8 +97,8 @@ class IntermittentWatcher(object):
         while True:
             cur_time = datetime.now()
             if cur_time.hour >= 0 and cur_time.day > self.last_updated:
-                # self.update()
+                self.update()
                 self.last_updated = cur_time.day
                 self.log('Running tests...')
             self.run()
-            exit()
+            self.test = 'wpt' if self.test == 'css' else 'css'

@@ -1,9 +1,8 @@
 {
-    "logins": [{
-        "user": "bot_1",
-        "token": "foo123"
-    }],
-    "secret": null,
+    "user": "bot",
+    "token": "foo123",
     "servo_path": "/media/Ubuntu/servo",
+    "log": "log.json",
+    "db_path": "/media/Ubuntu/intermittent-tracker",
     "build": "debug"
 }

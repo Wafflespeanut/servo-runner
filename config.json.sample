@@ -1,0 +1,8 @@
+{
+    "user": "bot",
+    "token": "foo123",
+    "servo_path": "/path/to/servo",
+    "log": "log.json",
+    "db_path": "/path/to/intermittent-tracker",
+    "build": "debug"
+}
