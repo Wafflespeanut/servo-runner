@@ -7,6 +7,7 @@ import json, requests
 
 class ServoGithubAPIProvider(object):
     base_url = 'https://api.github.com/repos/servo/servo'
+    new_issue_url = base_url + '/issues'
     issue_url = base_url + '/issues/%s/'
     comments_post_url = issue_url + 'comments'
 
@@ -39,3 +40,7 @@ class ServoGithubAPIProvider(object):
     def post_comment(self, comment, issue_number):
         url = self.comments_post_url % issue_number
         self._request('POST', url, {'body': comment})
+
+    def create_issue(self, title, body, labels: []):
+        content = {'title': title, 'body': body, 'labels': labels}
+        self._request('POST', self.new_issue_url, content)
