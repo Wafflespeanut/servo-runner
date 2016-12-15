@@ -42,7 +42,7 @@ class ServoGithubAPIProvider(object):
         _headers, body = self._request('POST', url, {'body': comment})
         return body
 
-    def create_issue(self, title, body, labels: []):
+    def create_issue(self, title, body, labels=[]):
         content = {'title': title, 'body': body, 'labels': labels}
         _headers, body = self._request('POST', self.new_issue_url, content)
         return body

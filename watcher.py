@@ -5,7 +5,7 @@ import json, os, subprocess, shutil, sys
 
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
-WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --no-pause --log-raw %s'
+WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
 NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure.'
@@ -13,7 +13,7 @@ NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure.'
 
 
 class IntermittentWatcher(object):
-    def __init__(self, upstream, user, token, db_path, build='debug', log_path='log.json'):
+    def __init__(self, upstream, user, token, db_path, build, log_path='log.json', is_dummy=False):
         os.chdir(upstream)
         self.api = ServoGithubAPIProvider(user, token)
         sys.path.append(os.path.join(db_path))
@@ -21,23 +21,25 @@ class IntermittentWatcher(object):
         with open(os.path.join(db_path, 'intermittents.json'), 'r') as fd:
             self.db = IntermittentsDB(json.load(fd))
         self.last_updated = datetime.now().day - 1
-        self.build = 'debug'
+        self.build = 'dev'
         if build == 'release':
             self.build = 'release'
         self.test = 'wpt'
         self.log_path = log_path
+        self.is_dummy = is_dummy
+        if is_dummy:
+            print '\033[1m\033[93mRunning in dummy mode: API will not be used!\033[0m'
         if os.path.exists(log_path):
             with open(log_path, 'r') as fd:
                 self.results = json.load(fd)
 
-    def execute(self, command, call= lambda l: None):
+    def execute(self, command):
         out = ''
         print '\033[93m%s\033[0m' % command
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
         for line in iter(proc.stdout.readline, ''):
-            sys.stdout.write(line)
+            sys.stdout.write(line)      # print stdout/stderr lines as and whenever we get one
             sys.stdout.flush()
-            call(line)      # call a custom function with stdout lines as and whenever we get one
             out += line
         proc.wait()
         return out
@@ -54,7 +56,8 @@ class IntermittentWatcher(object):
         out = self.execute(command)
         out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
 
-        with open(TEMP_LOG, 'r') as fd:     # analyze the raw log
+        self.log('Analyzing the raw log...')
+        with open(TEMP_LOG, 'r') as fd:
             for line in fd:
                 obj = json.loads(line)
                 if obj['thread'] == 'MainThread':
@@ -81,7 +84,8 @@ class IntermittentWatcher(object):
                         self.results[test]['issue'] = issues[0]['number']
                     self.results[test]['subtest'][subtest] = {'data': '', 'status': obj['status']}
 
-        for result in map(str.strip, out.split('\n\n')):    # now, the stdout (easy data)
+        self.log('Analyzing stdout...')
+        for result in map(str.strip, out.split('\n\n')):
             data = result.splitlines()
             name = data[0][data[0].find('/'):]
             if SUBTEST_PREFIX in result:
@@ -117,13 +121,15 @@ class IntermittentWatcher(object):
         labels = ['I-intermittent']
         if self.test == 'css':
             labels.append('A-content/css')
-        self.api.create_issue(title, body, labels)
+        args = [title, body, labels]
+        return args if self.is_dummy else self.api.create_issue(*args)
 
     def post_comment(self, test):
         self.log('Posting comment...')
         subtests = self.results[test]['subtest'].values()
         body = '\n\n'.join(map(lambda r: '    ' + r['data'], subtests) + [NOTIFICATION])
-        self.api.post_comment(body, self.results[test]['issue'])
+        args = [body, self.results[test]['issue']]
+        return args if self.is_dummy else self.api.post_comment(*args)
 
     def update(self):
         self.log('Updating upstream...')

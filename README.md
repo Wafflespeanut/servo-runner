@@ -11,4 +11,4 @@ Currently, this is not in a state for local usage. It requires:
  - `rr` binary built from [our fork](https://github.com/servo-automation/rr).
  - `IntermittentsDB` from the [intermittent-tracker](https://github.com/servo/intermittent-tracker/).
 
-Run `python runner.py` to begin the siege!
+Run `python runner.py` to begin the siege! Pass `--no-api` to avoid making API requests.
