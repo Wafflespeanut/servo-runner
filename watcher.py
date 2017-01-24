@@ -6,7 +6,7 @@ import json, os, subprocess, shutil, sys
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
 STDOUT_LOG = 'stdout'
-WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --log-raw %s'
+WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args="record -S" --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
 NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure. '
