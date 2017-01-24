@@ -21,5 +21,5 @@ if __name__ == '__main__':
                                   config['db_path'], build=config['build'], log_path=config['log'],
                                   is_dummy='--no-api' in args, branch=config['branch'],
                                   remote=config['remote'], suite=suite, subdir=subdir,
-                                  no_update='--no-update' in args)
+                                  no_update='--no-update' in args, no_execute='--no-execute' in args)
     watcher.start()
