@@ -41,6 +41,8 @@ class IntermittentWatcher(object):
         if os.path.exists(log_path):
             with open(log_path, 'r') as fd:
                 self.results = json.load(fd)
+        else:
+            self.results = {}
 
     def execute(self, command):
         out = ''
