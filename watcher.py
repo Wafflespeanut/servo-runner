@@ -9,8 +9,8 @@ STDOUT_LOG = 'stdout'
 WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
-NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure.'
-                'Feel free to ping @jdm in case you need it!')
+NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure. '
+                'Let @jdm know if you need it!')
 
 
 class IntermittentWatcher(object):
