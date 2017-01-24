@@ -14,7 +14,7 @@ NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure.'
 
 class IntermittentWatcher(object):
     def __init__(self, upstream, user, token, db_path, build, log_path='log.json', is_dummy=False,
-                 branch='master', remote='origin', subdir=None, suite=None):
+                 branch='master', remote='origin', subdir=None, suite=None, no_update=False):
         os.chdir(upstream)
         self.api = ServoGithubAPIProvider(user, token)
         sys.path.append(os.path.join(db_path))
@@ -32,6 +32,7 @@ class IntermittentWatcher(object):
         self.branch = branch
         self.subdir = subdir
         self.suite = suite
+        self.no_update = no_update
         if is_dummy:
             print '\033[1m\033[93mRunning in dummy mode: API will not be used!\033[0m'
         if os.path.exists(log_path):
@@ -139,6 +140,8 @@ class IntermittentWatcher(object):
         return args if self.is_dummy else self.api.post_comment(*args)
 
     def update(self):
+        if self.no_update:
+            return
         self.log('Updating upstream...')
         self.execute('git checkout master')
         self.execute('git pull %s master' % self.remote)

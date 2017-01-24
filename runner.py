@@ -20,5 +20,6 @@ if __name__ == '__main__':
     watcher = IntermittentWatcher(config['servo_path'], config['user'], config['token'],
                                   config['db_path'], build=config['build'], log_path=config['log'],
                                   is_dummy='--no-api' in args, branch=config['branch'],
-                                  remote=config['remote'], suite=suite, subdir=subdir)
+                                  remote=config['remote'], suite=suite, subdir=subdir,
+                                  no_update='--no-update' in args)
     watcher.start()
