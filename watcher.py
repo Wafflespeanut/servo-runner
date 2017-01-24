@@ -75,7 +75,10 @@ class IntermittentWatcher(object):
             with open(STDOUT_LOG, 'wb') as f:
                 f.write(out)
 
-        out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
+        if out.find(OUTPUT_HEAD) == -1:
+            out = ''
+        else:
+            out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
 
         self.log('Analyzing the raw log...')
         with open(TEMP_LOG, 'r') as fd:
@@ -108,6 +111,8 @@ class IntermittentWatcher(object):
 
         self.log('Analyzing stdout...')
         for result in map(str.strip, out.split('\n\n')):
+            if not result:
+                continue
             data = result.splitlines()
             name = data[0][data[0].find('/'):]
             if SUBTEST_PREFIX in result:
