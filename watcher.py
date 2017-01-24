@@ -44,7 +44,7 @@ class IntermittentWatcher(object):
         else:
             self.results = {}
 
-    def execute(self, command):
+    def execute(self, command, suppress=False):
         out = ''
         print '\033[93m%s\033[0m' % command
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
@@ -53,6 +53,8 @@ class IntermittentWatcher(object):
             sys.stdout.flush()
             out += line
         proc.wait()
+        if not suppress and proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, command, out)
         return out
 
     def log(self, msg):
@@ -71,7 +73,7 @@ class IntermittentWatcher(object):
                 command += ' --release'
             if self.subdir:
                 command += ' %s' % self.subdir
-            out = self.execute(command)
+            out = self.execute(command, suppress=True)
             with open(STDOUT_LOG, 'wb') as f:
                 f.write(out)
 
