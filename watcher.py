@@ -5,6 +5,7 @@ import json, os, subprocess, shutil, sys
 
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
+STDOUT_LOG = 'stdout'
 WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
@@ -14,7 +15,8 @@ NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure.'
 
 class IntermittentWatcher(object):
     def __init__(self, upstream, user, token, db_path, build, log_path='log.json', is_dummy=False,
-                 branch='master', remote='origin', subdir=None, suite=None, no_update=False):
+                 branch='master', remote='origin', subdir=None, suite=None, no_update=False,
+                 no_execute=False):
         os.chdir(upstream)
         self.api = ServoGithubAPIProvider(user, token)
         sys.path.append(os.path.join(db_path))
@@ -33,6 +35,7 @@ class IntermittentWatcher(object):
         self.subdir = subdir
         self.suite = suite
         self.no_update = no_update
+        self.no_execute = no_execute
         if is_dummy:
             print '\033[1m\033[93mRunning in dummy mode: API will not be used!\033[0m'
         if os.path.exists(log_path):
@@ -56,12 +59,20 @@ class IntermittentWatcher(object):
     def run(self):
         current = {}
         self.log('Running tests...')
-        command = WPT_COMMAND % (self.test, TEMP_LOG)
-        if self.build == 'release':
-            command += ' --release'
-        if self.subdir:
-            command += ' %s' % self.subdir
-        out = self.execute(command)
+
+        if self.no_execute:
+            with open(STDOUT_LOG, 'rb') as f:
+                out = f.read()
+        else:
+            command = WPT_COMMAND % (self.test, TEMP_LOG)
+            if self.build == 'release':
+                command += ' --release'
+            if self.subdir:
+                command += ' %s' % self.subdir
+            out = self.execute(command)
+            with open(STDOUT_LOG, 'wb') as f:
+                f.write(out)
+
         out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
 
         self.log('Analyzing the raw log...')
@@ -80,10 +91,11 @@ class IntermittentWatcher(object):
                         data = obj['data'].split()
                         old = self.results[test]['record']
                         new = data[-1][1:-2]        # rr-record location
-                        if old:
+                        if old and old != new:
                             self.log('Replacing existing record %r with new one %r for test %r' % \
                                      (old, new, test))
-                            shutil.rmtree(old)
+                            if os.path.exists(old):
+                                shutil.rmtree(old)
                         self.results[test]['record'] = new
                 if obj.get('expected'):     # there's an unexpected result
                     test, subtest = current[obj['thread']], obj.get('subtest', obj['test'])
@@ -104,7 +116,7 @@ class IntermittentWatcher(object):
             self.results[test]['subtest'][subtest]['data'] = result
 
         self.log('Cleaning up recordings...')
-        for test, result in self.results.iteritems():
+        for test, result in list(self.results.iteritems()):
             if result['subtest']:
                 if not result['notified']:
                     fn = self.post_comment if result['issue'] else self.create_issue
@@ -114,7 +126,8 @@ class IntermittentWatcher(object):
                 result = self.results.pop(test)
                 if result['record']:
                     self.log('Removing unused record %r for test %r' % (result['record'], test))
-                    shutil.rmtree(result['record'])
+                    if os.path.exists(result['record']):
+                        shutil.rmtree(result['record'])
 
         with open(self.log_path, 'w') as fd:
             self.log('Dumping the test results...')
@@ -156,5 +169,7 @@ class IntermittentWatcher(object):
                 self.update()
                 self.last_updated = cur_time.day
             self.run()
+            if self.no_execute:
+                return
             if not self.suite:
                 self.test = 'wpt' if self.test == 'css' else 'css'
