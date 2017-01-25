@@ -2,9 +2,9 @@
     "user": "bot",
     "token": "foo123",
     "servo_path": "/path/to/servo",
+    "servo_clones": "/path/to/store/clones",
     "log": "log.json",
     "db_path": "/path/to/intermittent-tracker",
     "build": "debug"
-    "remote": "upstream",
     "branch": "master"
 }
