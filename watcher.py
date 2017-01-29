@@ -5,15 +5,18 @@ import json, os, subprocess, shutil, sys
 
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
-WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args=record --log-raw %s'
+STDOUT_LOG = 'stdout'
+WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args="record -S" --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
-NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure.'
-                'Feel free to ping @jdm in case you need it!')
+NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure. '
+                'Let @jdm know if you need it!')
 
 
 class IntermittentWatcher(object):
-    def __init__(self, upstream, user, token, db_path, build, log_path='log.json', is_dummy=False):
+    def __init__(self, upstream, user, token, db_path, build, log_path='log.json', is_dummy=False,
+                 branch='master', remote='origin', subdir=None, suite=None, no_update=False,
+                 no_execute=False):
         os.chdir(upstream)
         self.api = ServoGithubAPIProvider(user, token)
         sys.path.append(os.path.join(db_path))
@@ -27,13 +30,21 @@ class IntermittentWatcher(object):
         self.test = 'wpt'
         self.log_path = log_path
         self.is_dummy = is_dummy
+        self.remote = remote
+        self.branch = branch
+        self.subdir = subdir
+        self.suite = suite
+        self.no_update = no_update
+        self.no_execute = no_execute
         if is_dummy:
             print '\033[1m\033[93mRunning in dummy mode: API will not be used!\033[0m'
         if os.path.exists(log_path):
             with open(log_path, 'r') as fd:
                 self.results = json.load(fd)
+        else:
+            self.results = {}
 
-    def execute(self, command):
+    def execute(self, command, suppress=False):
         out = ''
         print '\033[93m%s\033[0m' % command
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
@@ -42,6 +53,8 @@ class IntermittentWatcher(object):
             sys.stdout.flush()
             out += line
         proc.wait()
+        if not suppress and proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, command, out)
         return out
 
     def log(self, msg):
@@ -50,11 +63,24 @@ class IntermittentWatcher(object):
     def run(self):
         current = {}
         self.log('Running tests...')
-        command = WPT_COMMAND % (self.test, TEMP_LOG)
-        if self.build == 'release':
-            command += ' --release'
-        out = self.execute(command)
-        out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
+
+        if self.no_execute:
+            with open(STDOUT_LOG, 'rb') as f:
+                out = f.read()
+        else:
+            command = WPT_COMMAND % (self.test, TEMP_LOG)
+            if self.build == 'release':
+                command += ' --release'
+            if self.subdir:
+                command += ' %s' % self.subdir
+            out = self.execute(command, suppress=True)
+            with open(STDOUT_LOG, 'wb') as f:
+                f.write(out)
+
+        if out.find(OUTPUT_HEAD) == -1:
+            out = ''
+        else:
+            out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
 
         self.log('Analyzing the raw log...')
         with open(TEMP_LOG, 'r') as fd:
@@ -72,10 +98,11 @@ class IntermittentWatcher(object):
                         data = obj['data'].split()
                         old = self.results[test]['record']
                         new = data[-1][1:-2]        # rr-record location
-                        if old:
+                        if old and old != new:
                             self.log('Replacing existing record %r with new one %r for test %r' % \
                                      (old, new, test))
-                            shutil.rmtree(old)
+                            if os.path.exists(old):
+                                shutil.rmtree(old)
                         self.results[test]['record'] = new
                 if obj.get('expected'):     # there's an unexpected result
                     test, subtest = current[obj['thread']], obj.get('subtest', obj['test'])
@@ -86,6 +113,8 @@ class IntermittentWatcher(object):
 
         self.log('Analyzing stdout...')
         for result in map(str.strip, out.split('\n\n')):
+            if not result:
+                continue
             data = result.splitlines()
             name = data[0][data[0].find('/'):]
             if SUBTEST_PREFIX in result:
@@ -96,7 +125,7 @@ class IntermittentWatcher(object):
             self.results[test]['subtest'][subtest]['data'] = result
 
         self.log('Cleaning up recordings...')
-        for test, result in self.results.iteritems():
+        for test, result in list(self.results.iteritems()):
             if result['subtest']:
                 if not result['notified']:
                     fn = self.post_comment if result['issue'] else self.create_issue
@@ -106,7 +135,8 @@ class IntermittentWatcher(object):
                 result = self.results.pop(test)
                 if result['record']:
                     self.log('Removing unused record %r for test %r' % (result['record'], test))
-                    shutil.rmtree(result['record'])
+                    if os.path.exists(result['record']):
+                        shutil.rmtree(result['record'])
 
         with open(self.log_path, 'w') as fd:
             self.log('Dumping the test results...')
@@ -132,8 +162,12 @@ class IntermittentWatcher(object):
         return args if self.is_dummy else self.api.post_comment(*args)
 
     def update(self):
+        if self.no_update:
+            return
         self.log('Updating upstream...')
-        self.execute('git pull upstream master')
+        self.execute('git checkout master')
+        self.execute('git pull %s master' % self.remote)
+        self.execute('git rebase master %s' % self.branch)
         self.log('Building in %s mode...' % self.build)
         self.execute('./mach build --%s' % self.build)
 
@@ -144,4 +178,7 @@ class IntermittentWatcher(object):
                 self.update()
                 self.last_updated = cur_time.day
             self.run()
-            self.test = 'wpt' if self.test == 'css' else 'css'
+            if self.no_execute:
+                return
+            if not self.suite:
+                self.test = 'wpt' if self.test == 'css' else 'css'
