@@ -136,6 +136,7 @@ class IntermittentWatcher(object):
                 subtest = data[1][(data[1].find(']') + 2):]     # get the subtest name
             else:
                 test, subtest = name, name      # tests without subtests
+            subtest = subtest.decode('unicode-escape')
             self.results[test]['subtest'][subtest]['data'] = result
 
         self.log('Cleaning up recordings...')
