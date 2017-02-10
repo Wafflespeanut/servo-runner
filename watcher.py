@@ -158,11 +158,11 @@ class IntermittentWatcher(object):
             json.dump(self.results, fd)
 
     def create_issue(self, test):
-        self.log('Opening issue...')
+        self.log('Opening issue for %s...' % test)
         subtests = self.results[test]['subtest'].values()
         status = subtests[0]['status']
-        title = 'Intermittent %s in %s' % (status, self.results[test])
-        body = '\n\n'.join(map(lambda r: '    ' + r['data'], subtests) + [NOTIFICATION])
+        title = 'Intermittent %s in %s' % (status, test)
+        body = '\n\n'.join(['```'] + map(lambda r: r['data'], subtests) + ['```'] + [NOTIFICATION])
         labels = ['I-intermittent']
         if self.test == 'css':
             labels.append('A-content/css')
