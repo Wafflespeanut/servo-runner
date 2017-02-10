@@ -5,7 +5,6 @@ import json, os, subprocess, shutil, sys, time
 
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
-STDOUT_LOG = 'stdout'
 STATUS_LOG = 'status'
 WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args="record -S" --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
@@ -76,38 +75,36 @@ class IntermittentWatcher(object):
         current = {}
         self.log('Running tests...')
 
-        stdout_log = os.path.join(self.base_clone, STDOUT_LOG)
-
-        if self.no_execute:
-            with open(stdout_log, 'rb') as f:
-                out = f.read()
-        else:
+        if not self.no_execute:
             command = WPT_COMMAND % (self.test, TEMP_LOG)
             if self.build == 'release':
                 command += ' --release'
             if self.subdir:
                 command += ' %s' % self.subdir
-            out = self.execute(command, suppress=True)
-            with open(stdout_log, 'wb') as f:
-                f.write(out)
-
-        if out.find(OUTPUT_HEAD) == -1:
-            out = ''
-        else:
-            out = out[(out.find(OUTPUT_HEAD) + len(OUTPUT_HEAD)):-1].strip()
+            self.execute(command, suppress=True)
 
         self.log('Analyzing the raw log...')
         with open(TEMP_LOG, 'r') as fd:
+            default_subtest = {'data': '', 'status': None}
             for line in fd:
                 obj = json.loads(line)
                 if obj['thread'] == 'MainThread':
                     continue
                 if obj['action'] == 'test_start':
-                    current[obj['thread']] = obj['test']    # tests running in each thread
+                    # tests running in each thread
+                    current[obj['thread']] = {'test': obj['test'], 'output': ''}
                     default = {'record': None, 'issue': None, 'subtest': {}, 'notified': False}
                     self.results.setdefault(obj['test'], default)
+                elif obj['action'] == 'test_end':
+                    test = current[obj['thread']]['test']
+                    # Only store the test's stdout if any subtests failed or the test has an
+                    # unexpected result
+                    if obj.get('expected') or self.results[test]['subtest']:
+                        subtest_result = self.results[test]['subtest'].setdefault(test, default_subtest)
+                        self.results[test]['subtest'][test]['data'] = current[obj['thread']]['output']
                 elif obj['action'] == 'process_output':
-                    test = current[obj['thread']]
+                    test = current[obj['thread']]['test']
+                    current[obj['thread']]['output'] += obj['data'] + '\n'
                     if obj['data'].startswith('rr: Saving'):
                         data = obj['data'].split()
                         old = self.results[test]['record']
@@ -118,26 +115,29 @@ class IntermittentWatcher(object):
                             if os.path.exists(old):
                                 shutil.rmtree(old)
                         self.results[test]['record'] = new
-                if obj.get('expected'):     # there's an unexpected result
-                    test, subtest = current[obj['thread']], obj.get('subtest', obj['test'])
-                    issues = self.db.query(test)
-                    if issues:      # since we're querying by name, we'll always get either one or none
-                        self.results[test]['issue'] = issues[0]['number']
-                    self.results[test]['subtest'][subtest] = {'data': '', 'status': obj['status']}
 
-        self.log('Analyzing stdout...')
-        for result in map(str.strip, out.split('\n\n')):
-            if not result:
-                continue
-            data = result.splitlines()
-            name = data[0][data[0].find('/'):]
-            if SUBTEST_PREFIX in result:
-                test = name[:-1]    # strip out the colon
-                subtest = data[1][(data[1].find(']') + 2):]     # get the subtest name
-            else:
-                test, subtest = name, name      # tests without subtests
-            subtest = subtest.decode('unicode-escape')
-            self.results[test]['subtest'][subtest]['data'] = result
+                # Both test_status and test_end can have an expected field indicating that an
+                # unexpected result was encountered.
+                if obj.get('expected'):
+                    test, subtest = current[obj['thread']]['test'], obj.get('subtest', obj['test'])
+                    issues = self.db.query(test)
+                    if issues:
+                        selected = 0
+                        # When multiple issues match, we check for patterns like
+                        # "Intermittent [status] in path/to/test.html" to find
+                        # this most meaningful result.
+                        if len(issues) > 1:
+                            status = obj['status'].lower()
+                            for (i, issue) in enumerate(issues):
+                                if status in issue['title'].lower():
+                                    selected = i
+                        self.results[test]['issue'] = issues[selected]['number']
+                    subtest_result = self.results[test]['subtest'].setdefault(subtest, default_subtest)
+                    subtest_result['status'] = obj['status']
+                    # For test_end actions there is no associated message. We have already recorded
+                    # the full process output and stored it in the data field of the test results.
+                    if obj['action'] == 'test_status':
+                        self.results[test]['subtest'][subtest]['data'] = obj.get('message', '')
 
         self.log('Cleaning up recordings...')
         for test, result in list(self.results.iteritems()):
