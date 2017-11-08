@@ -6,7 +6,7 @@ import json, os, subprocess, shutil, sys, time
 RR_PATH = os.path.expanduser('~/.local/share/rr')
 TEMP_LOG = '/tmp/wpt_log'
 STATUS_LOG = 'status'
-WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args="record -S" --log-raw %s'
+WPT_COMMAND = './mach test-%s --debugger=rr --debugger-args="record -S --chaos" --log-raw %s'
 OUTPUT_HEAD = 'Tests with unexpected results:'
 SUBTEST_PREFIX = 'Unexpected subtest result'
 NOTIFICATION = ('Hey! I have a `rr` recording corresponding to this failure. '
@@ -100,7 +100,7 @@ class IntermittentWatcher(object):
                     # Only store the test's stdout if any subtests failed or the test has an
                     # unexpected result
                     if obj.get('expected') or self.results[test]['subtest']:
-                        subtest_result = self.results[test]['subtest'].setdefault(test, default_subtest)
+                        subtest_result = self.results[test]['subtest'].setdefault(test, default_subtest.copy())
                         self.results[test]['subtest'][test]['data'] = current[obj['thread']]['output']
                 elif obj['action'] == 'process_output':
                     test = current[obj['thread']]['test']
@@ -132,7 +132,7 @@ class IntermittentWatcher(object):
                                 if status in issue['title'].lower():
                                     selected = i
                         self.results[test]['issue'] = issues[selected]['number']
-                    subtest_result = self.results[test]['subtest'].setdefault(subtest, default_subtest)
+                    subtest_result = self.results[test]['subtest'].setdefault(subtest, default_subtest.copy())
                     subtest_result['status'] = obj['status']
                     # For test_end actions there is no associated message. We have already recorded
                     # the full process output and stored it in the data field of the test results.
